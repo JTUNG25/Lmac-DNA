@@ -50,13 +50,15 @@ Before running the workflow, ensure you have the following software installed:
 
     The workflow will proceed through the following steps:
     *   **Concatenate Sequences:** All `.fasta` files from the `data/` directory will be combined into a single `results/combined.fasta` file.
-    *   **Multiple Sequence Alignment (MAFFT):** MAFFT will perform a multiple sequence alignment on the `combined.fasta` file, producing `results/mafft/combined.aligned.fasta`.
-    *   **Conservation Analysis (trimAl):** trimAl will then process the aligned FASTA file to remove poorly aligned regions, which can be interpreted as less conserved areas, generating `results/trimal/combined.trimmed.fasta`.
+    *   **Multiple Sequence Alignment (MAFFT):** MAFFT will perform a multiple sequence alignment on the `combined.fasta` file.
+    *   **Conservation Analysis (trimAl):** trimAl will process the aligned FASTA file to remove poorly aligned regions.
+    *   **Polymorphism Identification (SNP-sites):** SNP-sites will analyze the alignment to identify single nucleotide polymorphisms (SNPs) and generate a VCF file.
 
 ## 5. View Results
 
-The final output, which is the trimmed multiple sequence alignment, will be located at:
+The final output files will be:
 
-*   `results/trimal/combined.trimmed.fasta`
+*   **Trimmed Alignment:** `results/trimal/combined.trimmed.fasta`
+*   **Polymorphic Sites (VCF):** `results/snp-sites/polymorphic_sites.vcf`
 
-You will also find log files for MAFFT and trimAl in the `results/logs/` directory, which can be useful for debugging or understanding the execution details.
+You will also find log files for all steps in the `results/logs/` directory, which can be useful for debugging or understanding the execution details.

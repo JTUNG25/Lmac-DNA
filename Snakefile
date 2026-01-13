@@ -14,6 +14,7 @@ SAMPLES = glob.glob(os.path.join(config["data_dir"], "*.fasta"))
 rule all:
     input:
         "results/trimal/combined.trimmed.fasta",
+        "results/snp-sites/polymorphic_sites.vcf"
 
 # Rule to concatenate all input FASTA files into one
 rule concatenate_sequences:
@@ -50,3 +51,16 @@ rule trimal_analysis:
         "docker://quay.io/biocontainers/trimal:1.4.1--h57928b3_6"
     shell:
         "trimal -in {input} -out {output} -automated1 > {log}"
+
+# Rule for identifying polymorphic sites using SNP-sites
+rule snp_sites_analysis:
+    input:
+        "results/mafft/combined.aligned.fasta"
+    output:
+        "results/snp-sites/polymorphic_sites.vcf"
+    log:
+        "results/logs/snp-sites.log"
+    containerized:
+        "docker://quay.io/biocontainers/snp-sites:2.5.1--h103a89f_4"
+    shell:
+        "snp-sites -v -o {output} {input} 2> {log}"
