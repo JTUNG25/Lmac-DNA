@@ -1,0 +1,13 @@
+data_dir: "/Volumes/L_maculans-Q9141/sra_downloads/sra_gz"
+test_mode: true
+test_samples:
+  - "SRR24874137.tar.gz"
+  - "SRR24874138.tar.gz"
+  - "SRR24874147.tar.gz"
+  - "SRR24874140.tar.gz"
+  - "SRR24874141.tar.gz"
+  - "SRR24874142.tar.gz"
+  - "SRR24874143.tar.gz"
+  - "SRR24874144.tar.gz"
+  - "SRR24874145.tar.gz"
+  - "SRR24874146.tar.gz"
