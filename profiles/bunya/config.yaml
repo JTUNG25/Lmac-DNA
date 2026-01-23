@@ -3,7 +3,6 @@ cluster-generic-submit-cmd: mkdir -p logs/{rule} &&
   sbatch
   --account=a_qaafi_c
   --time={resources.runtime}
-  {resources.partitionFlag}
   --cpus-per-task={threads}
   --mem={resources.mem_mb}
   --job-name=smk-{rule}
@@ -13,7 +12,7 @@ cluster-generic-submit-cmd: mkdir -p logs/{rule} &&
 cluster-generic-status-cmd: status-sacct-robust.sh
 cluster-generic-cancel-cmd: scancel
 default-resources:
-  - partitionFlag="--partition=general"
+  - partitionFlag=""
   - mem_mb=4000
   - runtime=10
   - gpu=0
