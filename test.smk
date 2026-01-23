@@ -5,5 +5,7 @@ rule all:
 rule test:
     output:
         "output.txt"
+    log:
+        "logs/test/test.log"
     shell:
         "echo 'Hello from Bunya!' > {output}"
