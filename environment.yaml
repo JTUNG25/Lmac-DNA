@@ -1,0 +1,8 @@
+name: lmac-dna
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - mafft
+  - trimal
+  - snp-sites

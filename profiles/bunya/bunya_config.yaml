@@ -1,0 +1,39 @@
+executor: cluster-generic
+cluster-generic-submit-cmd: mkdir -p logs/{rule} &&
+  sbatch
+  --account=a_qaafi_c
+  --time={resources.runtime}
+  {resources.partitionFlag}
+  --cpus-per-task={threads}
+  --mem={resources.mem_mb}
+  --job-name=smk-{rule}
+  --output=logs/{rule}/{rule}-%j.out
+  --parsable
+  --gpus={resources.gpu}
+cluster-generic-status-cmd: status-sacct-robust.sh
+cluster-generic-cancel-cmd: scancel
+default-resources:
+  - partitionFlag="--partition=general"
+  - mem_mb=4000
+  - runtime=10
+  - gpu=0
+restart-times: 0
+max-jobs-per-second: 50
+max-status-checks-per-second: 10
+local-cores: 2
+cores: 50
+latency-wait: 60
+jobs: 128
+keep-going: true
+keep-storage-local-copies: true
+rerun-incomplete: true
+printshellcmds: true
+use-apptainer: true
+use-conda: False
+apptainer-args: "-B $PWD,$TMPDIR \
+  --nv \
+  -H $(mktemp -d) \
+  --pwd $PWD \
+  --containall --cleanenv --writable-tmpfs"
+rerun-triggers:
+  - mtime
