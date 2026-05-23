@@ -5,7 +5,7 @@
 #SBATCH --mem=128GB
 #SBATCH --time=04:00:00
 #SBATCH --job-name=genomad_viral
-#SBATCH --output=genomad.log
+#SBATCH --output=gm.log
 
 # ═════════════════════════════════════════════════════════════════════════════
 # geNomad submission script for Bunya HPC
@@ -14,7 +14,7 @@
 
 # Load conda
 source /sw/local/rocky8/noarch/rcc/software/miniforge/24.11.3-0/etc/profile.d/conda.sh
-mamba activate genomad_env
+conda activate genomad_env
 
 # Optional: Set temporary directories to avoid NFS bottleneck
 export TMPDIR=$TMPDIR
