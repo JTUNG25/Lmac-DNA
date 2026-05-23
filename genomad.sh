@@ -5,7 +5,7 @@
 #SBATCH --mem=128GB
 #SBATCH --time=04:00:00
 #SBATCH --job-name=genomad_viral
-#SBATCH --output=genomad_%j.log
+#SBATCH --output=genomad.log
 
 # ═════════════════════════════════════════════════════════════════════════════
 # geNomad submission script for Bunya HPC
@@ -14,10 +14,7 @@
 
 # Load conda
 source /sw/local/rocky8/noarch/rcc/software/miniforge/24.11.3-0/etc/profile.d/conda.sh
-conda activate genomad_env
-
-# Set working directory (adjust to your data location)
-cd /QRISdata/Q9141/lmac_rna
+mamba activate genomad_env
 
 # Optional: Set temporary directories to avoid NFS bottleneck
 export TMPDIR=$TMPDIR
@@ -27,7 +24,7 @@ export TMPDIR=$TMPDIR
 # ─────────────────────────────────────────────────────────────────────────────
 TRINITY_FILE="Lmac_Trinity.fasta"          # Your Trinity assembly file
 OUTPUT_DIR="viral_results"                 # Output directory name
-DATABASE_DIR="$HOME/genomad_db"            # geNomad database location
+DATABASE_DIR="genomad_db"            # geNomad database location
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RUN geNomad
