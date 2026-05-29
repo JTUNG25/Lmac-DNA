@@ -22,8 +22,8 @@ export TMPDIR=$TMPDIR
 # ─────────────────────────────────────────────────────────────────────────────
 # INPUT CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
-TRINITY_FILE="Lmac_Trinity.fasta"          # Your Trinity assembly file
-OUTPUT_DIR="viral_results"                 # Output directory name
+TRINITY_FILE="WT_Trinity.fasta"          # Your Trinity assembly file
+OUTPUT_DIR="viral_results_2"                 # Output directory name
 DATABASE_DIR="genomad_db"            # geNomad database location
 
 # ─────────────────────────────────────────────────────────────────────────────
