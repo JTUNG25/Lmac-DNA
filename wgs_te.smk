@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # =============================================================================
+# wgs_te.smk  —  WGS TE copy-number screen
+# Leptosphaeria maculans JN3
+#
 # Logic:
 #   1. Read significant_TEs.csv (from R script) → candidate TE family list
 #      Only upregulated TEs: log2FC > 1, padj < 0.05, already filtered for
@@ -12,7 +15,9 @@
 #   7. Collapse loci → per-family normalised depth per sample
 #   8. Compare each mutant vs WT → log2FC, flag INCREASED if >= log2(1.5)
 #   9. Final table cross-referenced against RNA log2FC from significant_TEs.csv
-
+#
+# WT: D5 (single replicate — depth comparisons are exploratory screen only)
+# No statistical test on depth — biological replicates needed for that.
 # =============================================================================
 
 import os
@@ -351,7 +356,6 @@ rule te_locus_depth:
             -a {input.bed} \
             -b {input.bam} \
             -mean \
-            -sorted \
         > {output}
         """
 
