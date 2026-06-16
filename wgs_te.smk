@@ -212,7 +212,7 @@ rule flagstat:
     container: samtools
     threads: 2
     resources:
-        mem_mb  = 4000,
+        mem_mb  = 8000,
         runtime = 15,
     shell:
         "samtools flagstat -@ {threads} {input.bam} > {output}"
@@ -230,7 +230,7 @@ rule coverage_summary:
         "results/qc/coverage_summary.txt",
     threads: 1
     resources:
-        mem_mb  = 4000,
+        mem_mb  = 8000,
         runtime = 5,
     run:
         with open(output[0], "w") as out:
@@ -262,49 +262,61 @@ rule coverage_summary:
 
 rule make_candidate_bed:
     """
-    Extract candidate TE family names from significant_TEs.csv and
-    filter JN3.te.bed to those families only.
-
-    BED col4 format: locus_id;te_name  (e.g. JN3_BAC01_1074_1337;rnd-1_family-13)
-    We match on the te_name part (after the semicolon).
+    Extract candidate TE family names from significant_TEs.csv,
+    filter JN3.te.bed to those families, then sort the BED to match
+    the BAM chromosome order (from the genome FASTA index).
+    This allows bedtools coverage -sorted to work correctly with low memory.
     """
     input:
         sig_csv = SIG_TE,
         te_bed  = TE_BED,
+        genome  = GENOME,
     output:
         "results/te_depth/candidate_te_loci.bed",
+    container: samtools
     threads: 1
     resources:
-        mem_mb  = 4000,
+        mem_mb  = 8000,
         runtime = 5,
-    run:
-        # collect all upregulated te_names across all mutants
-        candidate_names = set()
-        with open(input.sig_csv) as f:
-            f.readline()  # skip header
-            for line in f:
-                parts  = line.strip().split(",")
-                if len(parts) < 2:
-                    continue
-                feature = parts[1].strip('"')
-                te_name = feature.split(":")[0]   # e.g. rnd-1_family-29
-                candidate_names.add(te_name)
+    shell:
+        """
+        # build chromosome order from genome FASTA index (.fai col1 = chrom name in order)
+        cut -f1 {input.genome}.fai > /tmp/chrom_order_$SLURM_JOB_ID.txt
 
-        print(f"  {len(candidate_names)} candidate TE families from R script")
+        # filter BED to candidate families from significant_TEs.csv
+        # col4 format: locus_id;te_name — extract te_name (after semicolon)
+        python3 - << 'PYEOF'
+import sys
+candidate_names = set()
+with open("{input.sig_csv}") as f:
+    f.readline()
+    for line in f:
+        parts = line.strip().split(",")
+        if len(parts) < 2:
+            continue
+        feature = parts[1].strip('"')
+        te_name = feature.split(":")[0]
+        candidate_names.add(te_name)
 
-        # filter BED to matching loci
-        kept = 0
-        with open(input.te_bed) as f_in, open(output[0], "w") as f_out:
-            for line in f_in:
-                if line.startswith("#") or not line.strip():
-                    continue
-                col4    = line.strip().split("\t")[3]   # locus_id;te_name
-                te_name = col4.split(";")[1] if ";" in col4 else col4
-                if te_name in candidate_names:
-                    f_out.write(line)
-                    kept += 1
+print(f"  {{len(candidate_names)}} candidate TE families", file=sys.stderr)
+kept = 0
+with open("{input.te_bed}") as f_in, open("/tmp/candidate_unsorted_$SLURM_JOB_ID.bed", "w") as f_out:
+    for line in f_in:
+        if line.startswith("#") or not line.strip():
+            continue
+        col4 = line.strip().split("\t")[3]
+        te_name = col4.split(";")[1] if ";" in col4 else col4
+        if te_name in candidate_names:
+            f_out.write(line)
+            kept += 1
+print(f"  {{kept}} loci kept", file=sys.stderr)
+PYEOF
 
-        print(f"  {kept} TE loci kept in candidate BED")
+        # sort BED by BAM chromosome order then by start position
+        bedtools sort             -i /tmp/candidate_unsorted_$SLURM_JOB_ID.bed             -faidx /tmp/chrom_order_$SLURM_JOB_ID.txt         > {output}
+
+        rm -f /tmp/candidate_unsorted_$SLURM_JOB_ID.bed /tmp/chrom_order_$SLURM_JOB_ID.txt
+        """
 
 
 # =============================================================================
@@ -348,7 +360,7 @@ rule te_locus_depth:
     container: bedtools
     threads: 2
     resources:
-        mem_mb  = 64000,
+        mem_mb  = 128000,
         runtime = 60,
     shell:
         """
@@ -356,6 +368,7 @@ rule te_locus_depth:
             -a {input.bed} \
             -b {input.bam} \
             -mean \
+            -sorted \
         > {output}
         """
 
@@ -408,7 +421,7 @@ rule family_depth:
         "results/te_depth/{sample}.family_depth.tsv",
     threads: 1
     resources:
-        mem_mb  = 32000,
+        mem_mb  = 16000,
         runtime = 10,
     run:
         import re, collections
