@@ -5,7 +5,7 @@
 #SBATCH --mem=8GB
 #SBATCH --time=24:00:00
 #SBATCH --job-name=wgs_te
-#SBATCH --output=wgs_te_sm.log
+#SBATCH --output=sm.log
 
 source /sw/local/rocky8/noarch/rcc/software/miniforge/24.11.3-0/etc/profile.d/conda.sh
 conda activate snakemake8

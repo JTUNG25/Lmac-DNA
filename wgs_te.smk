@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 # =============================================================================
-# wgs_te.smk  —  WGS TE copy-number screen
-# Leptosphaeria maculans JN3
-#
 # Logic:
 #   1. Read significant_TEs.csv (from R script) → candidate TE family list
 #      Only upregulated TEs: log2FC > 1, padj < 0.05, already filtered for
@@ -15,9 +12,7 @@
 #   7. Collapse loci → per-family normalised depth per sample
 #   8. Compare each mutant vs WT → log2FC, flag INCREASED if >= log2(1.5)
 #   9. Final table cross-referenced against RNA log2FC from significant_TEs.csv
-#
-# WT: D5 (single replicate — depth comparisons are exploratory screen only)
-# No statistical test on depth — biological replicates needed for that.
+
 # =============================================================================
 
 import os
@@ -41,9 +36,9 @@ SIG_TE    = "data/significant_TEs.csv"   # from R script, already on HPC
 # ── samples ───────────────────────────────────────────────────────────────────
 WGS_WT      = "D5"
 WGS_MUTANTS = sorted([
-    p.stem.replace("_R1", "")
+    p.name.replace("_R1.fastq.gz", "")
     for p in Path(RAW_DIR).glob("*_R1.fastq.gz")
-    if p.stem.replace("_R1", "") != WGS_WT
+    if p.name.replace("_R1.fastq.gz", "") != WGS_WT
 ])
 ALL_WGS = WGS_MUTANTS + [WGS_WT]
 
