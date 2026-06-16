@@ -333,6 +333,7 @@ rule te_locus_depth:
         bam = "results/bwa/{sample}.sorted.bam",
         bai = "results/bwa/{sample}.sorted.bam.bai",
         bed = "results/te_depth/candidate_te_loci.bed",
+        fai = GENOME + ".fai",
     output:
         "results/te_depth/{sample}.locus_depth.bed",
     container: bedtools
@@ -347,6 +348,7 @@ rule te_locus_depth:
             -b {input.bam} \
             -mean \
             -sorted \
+            -g {input.fai} \
         > {output}
         """
 
