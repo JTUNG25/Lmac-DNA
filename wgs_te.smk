@@ -230,7 +230,7 @@ rule coverage_summary:
         "results/qc/coverage_summary.txt",
     threads: 1
     resources:
-        mem_mb  = 2000,
+        mem_mb  = 4000,
         runtime = 5,
     run:
         with open(output[0], "w") as out:
@@ -348,7 +348,7 @@ rule te_locus_depth:
     container: bedtools
     threads: 2
     resources:
-        mem_mb  = 16000,
+        mem_mb  = 64000,
         runtime = 60,
     shell:
         """
@@ -375,7 +375,7 @@ rule genome_mean_depth:
     container: samtools
     threads: 2
     resources:
-        mem_mb  = 8000,
+        mem_mb  = 16000,
         runtime = 20,
     shell:
         """
@@ -408,7 +408,7 @@ rule family_depth:
         "results/te_depth/{sample}.family_depth.tsv",
     threads: 1
     resources:
-        mem_mb  = 8000,
+        mem_mb  = 32000,
         runtime = 10,
     run:
         import re, collections
@@ -486,7 +486,7 @@ rule depth_vs_wt:
         "results/te_depth/{group}_vs_wt.tsv",
     threads: 1
     resources:
-        mem_mb  = 4000,
+        mem_mb  = 8000,
         runtime = 5,
     run:
         import math, re
@@ -589,7 +589,7 @@ rule crossref_group:
         "results/crossref/{group}_summary.tsv",
     threads: 1
     resources:
-        mem_mb  = 4000,
+        mem_mb  = 8000,
         runtime = 5,
     run:
         import math
@@ -705,7 +705,7 @@ rule merge_all_groups:
         "results/crossref/all_groups_summary.tsv",
     threads: 1
     resources:
-        mem_mb  = 2000,
+        mem_mb  = 8000,
         runtime = 5,
     run:
         header_written = False
