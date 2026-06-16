@@ -266,82 +266,60 @@ rule make_candidate_bed:
     filter JN3.te.bed to those families, then sort the BED to match
     the BAM chromosome order (from the genome FASTA index).
     This allows bedtools coverage -sorted to work correctly with low memory.
+
+    Uses a pure Python run block to avoid heredoc/variable expansion issues.
+    Sorting done via shell() call with bedtools sort -faidx.
     """
     input:
         sig_csv = SIG_TE,
         te_bed  = TE_BED,
-        genome  = GENOME,
+        fai     = GENOME + ".fai",
     output:
-        "results/te_depth/candidate_te_loci.bed",
-    container: samtools
+        bed      = "results/te_depth/candidate_te_loci.bed",
+        unsorted = temp("results/te_depth/candidate_te_loci.unsorted.bed"),
+    params:
+        bed_sif = bedtools,
     threads: 1
     resources:
         mem_mb  = 8000,
         runtime = 5,
-    shell:
-        """
-        # build chromosome order from genome FASTA index (.fai col1 = chrom name in order)
-        cut -f1 {input.genome}.fai > /tmp/chrom_order_$SLURM_JOB_ID.txt
+    run:
+        # ── step 1: filter BED to candidate families (pure Python) ────────
+        candidate_names = set()
+        with open(input.sig_csv) as f:
+            f.readline()
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) < 2:
+                    continue
+                feature = parts[1].strip('"')
+                te_name = feature.split(":")[0]
+                candidate_names.add(te_name)
 
-        # filter BED to candidate families from significant_TEs.csv
-        # col4 format: locus_id;te_name — extract te_name (after semicolon)
-        python3 - << 'PYEOF'
-import sys
-candidate_names = set()
-with open("{input.sig_csv}") as f:
-    f.readline()
-    for line in f:
-        parts = line.strip().split(",")
-        if len(parts) < 2:
-            continue
-        feature = parts[1].strip('"')
-        te_name = feature.split(":")[0]
-        candidate_names.add(te_name)
+        print(f"  {len(candidate_names)} candidate TE families from R script")
 
-print(f"  {{len(candidate_names)}} candidate TE families", file=sys.stderr)
-kept = 0
-with open("{input.te_bed}") as f_in, open("/tmp/candidate_unsorted_$SLURM_JOB_ID.bed", "w") as f_out:
-    for line in f_in:
-        if line.startswith("#") or not line.strip():
-            continue
-        col4 = line.strip().split("\t")[3]
-        te_name = col4.split(";")[1] if ";" in col4 else col4
-        if te_name in candidate_names:
-            f_out.write(line)
-            kept += 1
-print(f"  {{kept}} loci kept", file=sys.stderr)
-PYEOF
+        kept = 0
+        with open(input.te_bed) as f_in, open(output.unsorted, "w") as f_out:
+            for line in f_in:
+                if line.startswith("#") or not line.strip():
+                    continue
+                col4    = line.strip().split("\t")[3]
+                te_name = col4.split(";")[1] if ";" in col4 else col4
+                if te_name in candidate_names:
+                    f_out.write(line)
+                    kept += 1
 
-        # sort BED by BAM chromosome order then by start position
-        bedtools sort             -i /tmp/candidate_unsorted_$SLURM_JOB_ID.bed             -faidx /tmp/chrom_order_$SLURM_JOB_ID.txt         > {output}
+        print(f"  {kept} TE loci written to unsorted BED")
 
-        rm -f /tmp/candidate_unsorted_$SLURM_JOB_ID.bed /tmp/chrom_order_$SLURM_JOB_ID.txt
-        """
-
-
-# =============================================================================
-# SECTION 4 — TE READ DEPTH
-#
-# How copy number is estimated from WGS read depth:
-#
-#   The reference genome has known TE loci (positions in JN3.te.bed).
-#   After BWA-MEM alignment, reads pile up over these loci.
-#   More genomic copies of a TE family → more reads mapping to those positions
-#   → higher read depth at those loci.
-#
-#   Raw depth varies between samples due to differences in total sequencing
-#   depth, so we normalise:
-#
-#     norm_depth = mean_depth_over_TE_loci / genome_wide_mean_depth
-#
-#   This gives a value independent of sequencing depth.
-#   Then: log2FC = log2(mutant_norm / wt_norm)
-#   A positive log2FC suggests more TE copies in the mutant vs WT.
-#
-#   Important caveat: this measures depth at REFERENCE loci only.
-#   New insertions at novel sites are not captured here — they would
-#   require McClintock-style split-read analysis (can be added later).
-# =============================================================================
+        # ── step 2: sort BED by genome chromosome order ───────────────────
+        # bedtools sort -faidx orders chromosomes to match BWA/BAM order
+        shell(
+            "apptainer exec {params.bed_sif} "
+            "bedtools sort "
+            "-i {output.unsorted} "
+            "-faidx {input.fai} "
+            "> {output.bed}"
+        )
 
 rule te_locus_depth:
     """
