@@ -52,25 +52,30 @@ ALL_WGS = WGS_MUTANTS + [WGS_WT]
 # so we can pull the right candidate TE list per mutant group
 WGS_TO_LABEL = {
     "A1-1":  "Δago1",  "A1-2":  "Δago1",  "A1-3":  "Δago1",
+    "A2-1":  "Δago2",  "A2-2":  "Δago2",  "A2-3":  "Δago2",
     "A3-1":  "Δago3",
     "A13-1": "Δago13", "A13-2": "Δago13",
     "D1":    "Δdcl1",
     "D2-2":  "Δdcl2",  "D2-3":  "Δdcl2",
     "R1-1":  "Δrdrp1",
+    "R1-2":  "Δrdrp1",
     "R2-2":  "Δrdrp2", "R2-3":  "Δrdrp2",
     "R2-4":  "Δrdrp2", "R2-5":  "Δrdrp2",
+    "R3-1":  "Δrdrp3", "R3-2":  "Δrdrp3", "R3-3":  "Δrdrp3",
     "R12-1": "Δrdrp12","R12-2": "Δrdrp12","R12-3": "Δrdrp12",
 }
 
 # ── mutant groups (for per-group depth comparison output) ─────────────────────
 GROUPS = {
     "ago1":  {"label": "Δago1",   "samples": ["A1-1", "A1-2", "A1-3"]},
+    "ago2":  {"label": "Δago2",   "samples": ["A2-1", "A2-2", "A2-3"]},
     "ago3":  {"label": "Δago3",   "samples": ["A3-1"]},
     "ago13": {"label": "Δago13",  "samples": ["A13-1", "A13-2"]},
     "dcl1":  {"label": "Δdcl1",   "samples": ["D1"]},
     "dcl2":  {"label": "Δdcl2",   "samples": ["D2-2", "D2-3"]},
-    "rdrp1": {"label": "Δrdrp1",  "samples": ["R1-1"]},
+    "rdrp1": {"label": "Δrdrp1",  "samples": ["R1-1", "R1-2"]},
     "rdrp2": {"label": "Δrdrp2",  "samples": ["R2-2", "R2-3", "R2-4", "R2-5"]},
+    "rdrp3": {"label": "Δrdrp3",  "samples": ["R3-1","R3-2", "R3-3"]},
     "rdrp12":{"label": "Δrdrp12", "samples": ["R12-1", "R12-2", "R12-3"]},
 }
 
