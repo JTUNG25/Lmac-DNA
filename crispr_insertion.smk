@@ -155,7 +155,7 @@ rule bowtie2_align:
     params:
         index_name = get_sample_reference,
         rg = r"@RG\tID:{sample}\tSM:{sample}\tPL:ILLUMINA",
-        tmp = "/scratch/temp/$SLURM_JOB_ID/bowtie2_{sample}",
+        tmp = "/scratch/temp/bowtie2_{sample}_{jobid}",
     shell:
         """
         module load bowtie2/2.5.1-gcc-12.3.0
