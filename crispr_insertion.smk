@@ -47,7 +47,6 @@ SAMPLE_TO_REFERENCE = {
     "D2-3": f"{GENOME_DIR}/JN3_D2.fa",
     # Δrdrp1 group
     "R1-1": f"{GENOME_DIR}/JN3_R1.fa",
-    "R1-2": f"{GENOME_DIR}/JN3_R1.fa",
     # Δrdrp2 group
     "R2-2": f"{GENOME_DIR}/JN3_R2.fa",
     "R2-3": f"{GENOME_DIR}/JN3_R2.fa",
@@ -61,8 +60,6 @@ SAMPLE_TO_REFERENCE = {
     "R12-1": f"{GENOME_DIR}/JN3_R12.fa",
     "R12-2": f"{GENOME_DIR}/JN3_R12.fa",
     "R12-3": f"{GENOME_DIR}/JN3_R12.fa",
-    # WT
-    "D5": f"{GENOME_DIR}/JN3.fa",
 }
 
 ALL_REFERENCES = sorted(set(SAMPLE_TO_REFERENCE.values()))
@@ -101,6 +98,25 @@ rule all:
         "results/summary/all_samples_candidates.tsv",
 
 
+rule samtools_faidx:
+    """
+    Generate FASTA index (.fai) for each reference genome.
+    Required by samtools and other tools for random access to sequences.
+    """
+    input:
+        "{genome}"
+    output:
+        "{genome}.fai"
+    container: samtools
+    threads: 1
+    resources:
+        mem_mb = 4000,
+        runtime = 10,
+    shell:
+        """
+        samtools faidx {input}
+        """
+        
 # =============================================================================
 # SECTION 1 — BOWTIE2 ALIGNMENT
 # =============================================================================
