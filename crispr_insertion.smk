@@ -20,11 +20,8 @@ bowtie2  = "docker://quay.io/biocontainers/bowtie2:2.5.4--py312h2b63842_1"
 samtools = "docker://quay.io/biocontainers/samtools:1.19.2--h50ea8bc_0"
 bedtools = "docker://quay.io/biocontainers/bedtools:2.31.1--hf5e1c6e_0"
 
-FASTP_DIR = "results/fastp"  # From wgs_te.smk output
+FASTP_DIR = "results/fastp"
 GENOME_DIR = "data/genome"
-
-# ── sample to reference genome mapping ──────────────────────────────────────────
-
 SAMPLE_TO_REFERENCE = {
     # Δago1 group
     "A1-1": f"{GENOME_DIR}/JN3_A1.fa",
@@ -115,7 +112,9 @@ rule bowtie2_index:
     params:
         index_name = "{genome}",
     shell:
-        "bowtie2-build --threads {threads} {input} {params.index_name}"
+    """
+    bowtie2-build --threads {threads} {input} {params.index_name}
+    """
 
 
 rule bowtie2_align:
