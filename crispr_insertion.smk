@@ -16,12 +16,16 @@ import re
 from pathlib import Path
 from collections import defaultdict
 
+# ── containers ────────────────────────────────────────────────────────────────
 bowtie2 = "docker://quay.io/biocontainers/bowtie2:2.5.4--py312h2b63842_1"
 samtools = "docker://quay.io/biocontainers/samtools:1.19.2--h50ea8bc_0"
 bedtools = "docker://quay.io/biocontainers/bedtools:2.31.1--hf5e1c6e_0"
 
+# ── paths ─────────────────────────────────────────────────────────────────────
 FASTP_DIR = "results/fastp"
 GENOME_DIR = "data/genome"
+
+# ── sample to reference genome mapping ──────────────────────────────────────────
 SAMPLE_TO_REFERENCE = {
     # Δago1 group
     "A1-1": f"{GENOME_DIR}/JN3_A1.fa",
@@ -84,36 +88,29 @@ def get_sample_reference(wc):
 # =============================================================================
 rule all:
     input:
-        expand(
-            multiext(
-                "{genome}",
-                ".1.bt2",
-                ".2.bt2",
-                ".3.bt2",
-                ".4.bt2",
-                ".rev.1.bt2",
-                ".rev.2.bt2",
-            ),
-            genome=ALL_REFERENCES,
-        ),
-        # aligned BAMs
+        expand("{genome}.1.bt2", genome=ALL_REFERENCES),
         expand("results/bowtie2/{sample}.sorted.bam", sample=ALL_SAMPLES),
         expand("results/bowtie2/{sample}.sorted.bam.bai", sample=ALL_SAMPLES),
-        # QC
         expand("results/qc/{sample}.flagstat.txt", sample=ALL_SAMPLES),
         "results/qc/mapping_summary.txt",
-        # extracted reads (evidence of insertions)
         expand("results/reads/{sample}.discordant.bam", sample=ALL_SAMPLES),
         expand("results/reads/{sample}.softclipped.bam", sample=ALL_SAMPLES),
         expand("results/reads/{sample}.unmapped_mate.bam", sample=ALL_SAMPLES),
-        # insertion hotspot analysis
         expand("results/hotspots/{sample}.insertion_hotspots.bed", sample=ALL_SAMPLES),
-        # summary report
         expand("results/summary/{sample}.insertion_candidates.tsv", sample=ALL_SAMPLES),
         "results/summary/all_samples_candidates.tsv",
 
 
+# =============================================================================
+# SECTION 1 — BOWTIE2 ALIGNMENT
+# =============================================================================
+
+
 rule bowtie2_index:
+    """
+    Build Bowtie2 index for each reference genome (with T-DNA added).
+    One index per mutant group reference.
+    """
     input:
         "{genome}",
     output:
@@ -141,13 +138,6 @@ rule bowtie2_index:
 
 
 rule bowtie2_align:
-    """
-    Key parameters:
-      -k 5  : report up to 5 alignments (useful for CRISPR repeats)
-      -X 1000    : max fragment length (typical insert size range)
-      --very-sensitive : thorough but slower
-      --no-unal  : exclude unmapped reads from SAM (we extract them separately)
-    """
     input:
         r1=r1,
         r2=r2,
@@ -208,10 +198,6 @@ rule bowtie2_align:
 
 
 rule flagstat:
-    """
-    Generate mapping statistics for each sample.
-    Shows: total reads, mapped reads, paired reads, properly paired, etc.
-    """
     input:
         bam="results/bowtie2/{sample}.sorted.bam",
         bai="results/bowtie2/{sample}.sorted.bam.bai",
@@ -228,10 +214,6 @@ rule flagstat:
 
 
 rule mapping_summary:
-    """
-    Summarize mapping quality across all samples.
-    Check for unexpectedly low mapped reads or high multi-mapping rates.
-    """
     input:
         expand("results/qc/{sample}.flagstat.txt", sample=ALL_SAMPLES),
     output:
@@ -269,43 +251,10 @@ rule mapping_summary:
 
 # =============================================================================
 # SECTION 3 — EXTRACT READS WITH INSERTION EVIDENCE
-#
-# FLAG meanings:
-#   2  = properly paired (both mates aligned as expected)
-#   4  = unmapped
-#   8  = mate unmapped
-#   16 = reverse strand
-#   32 = mate on reverse strand
-#
-# Discordant (use -F 2):
-#   - Pairs far apart
-#   - Unexpected orientation (both same strand)
-#   - Different chromosomes
-#   All suggest structural variation / insertion
-#
-# Soft-clipped (CIGAR has S):
-#   - Reads with unaligned sequence at ends
-#   - Common at insertion junctions
-#
-# Unmapped with mapped mate (use -f 4 -F 8):
-#   - Insert broke one side of pair
-#   - Other mate still aligns nearby
 # =============================================================================
 
 
 rule extract_discordant:
-    """
-    Extract improperly paired reads (discordant pairs).
-    These are pairs where:
-    - One or both mates are unmapped
-    - Mates are on different chromosomes
-    - Mates are far apart (>1000bp default)
-    - Mates are in unexpected orientation
-
-    All of these suggest structural variation including insertions.
-
-    Flag -F 2 = exclude flag 2 (properly paired) → keep only improper pairs
-    """
     input:
         bam="results/bowtie2/{sample}.sorted.bam",
         bai="results/bowtie2/{sample}.sorted.bam.bai",
@@ -319,24 +268,11 @@ rule extract_discordant:
         runtime=30,
     shell:
         """
-        samtools view \
-            -b \
-            -@ {threads} \
-            -F 2 \
-            {input.bam} >{output}
+        samtools view -b -@ {threads} -F 2 {input.bam} >{output}
         """
 
 
 rule extract_softclipped:
-    """
-    Extract soft-clipped reads.
-
-    Soft clipping (CIGAR S) = part of read is aligned, part is not.
-    Common at insertion breakpoints where the junction sequence
-    doesn't match the reference.
-
-    Extract reads with any soft-clipping in CIGAR string.
-    """
     input:
         bam="results/bowtie2/{sample}.sorted.bam",
         bai="results/bowtie2/{sample}.sorted.bam.bai",
@@ -351,30 +287,18 @@ rule extract_softclipped:
     run:
         import pysam
 
-        # Open BAM and create output BAM with same header
         inbam = pysam.AlignmentFile(input.bam, "rb")
         outbam = pysam.AlignmentFile(output[0], "wb", template=inbam)
         count = 0
         for read in inbam:
-            # Check if CIGAR contains S (soft-clipping)
             if read.cigarstring and "S" in read.cigarstring:
                 outbam.write(read)
                 count += 1
         inbam.close()
         outbam.close()
-        print(f"  Extracted {count} soft-clipped reads from {input.bam}")
 
 
 rule extract_unmapped_mate:
-    """
-    Extract reads where one mate is unmapped but the other is mapped.
-
-    Flag -f 4  = include unmapped reads
-    Flag -F 8  = exclude reads where mate is also unmapped
-
-    Result: reads that are unmapped but have a mapped mate
-    (suggests insert at this location broke one side of the pair)
-    """
     input:
         bam="results/bowtie2/{sample}.sorted.bam",
         bai="results/bowtie2/{sample}.sorted.bam.bai",
@@ -388,38 +312,16 @@ rule extract_unmapped_mate:
         runtime=30,
     shell:
         """
-        samtools view \
-            -b \
-            -@ {threads} \
-            -f 4 \
-            -F 8 \
-            {input.bam} >{output}
+        samtools view -b -@ {threads} -f 4 -F 8 {input.bam} >{output}
         """
 
 
 # =============================================================================
 # SECTION 4 — IDENTIFY INSERTION HOTSPOTS
-#
-# For each read type (discordant, soft-clipped, unmapped_mate),
-# extract the mapping positions and count coverage in sliding windows.
-# Regions with clustering of insertion evidence are candidates for
-# actual insertion sites.
-#
-# Output: BED file with positions and evidence counts
 # =============================================================================
 
 
 rule find_hotspots:
-    """
-    Find insertion hotspots by analyzing clustering of evidence reads.
-
-    For each sample, combines:
-    - Positions where discordant pairs map
-    - Positions of soft-clipped reads
-    - Positions of unmapped reads (mate)
-
-    Produces a BED file with hotspot regions and evidence counts.
-    """
     input:
         discordant="results/reads/{sample}.discordant.bam",
         softclipped="results/reads/{sample}.softclipped.bam",
@@ -437,11 +339,9 @@ rule find_hotspots:
         import pysam
         from collections import defaultdict
 
-        # Collect evidence positions
         positions = defaultdict(
             lambda: {"discordant": 0, "softclipped": 0, "unmapped": 0}
         )
-        # Read discordant pairs
         try:
             bam = pysam.AlignmentFile(input.discordant, "rb")
             for read in bam:
@@ -451,7 +351,6 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-        # Read soft-clipped
         try:
             bam = pysam.AlignmentFile(input.softclipped, "rb")
             for read in bam:
@@ -461,11 +360,9 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-        # Read unmapped with mate
         try:
             bam = pysam.AlignmentFile(input.unmapped, "rb")
             for read in bam:
-                # Get mate position if available
                 if (
                     read.next_reference_name
                     and not read.next_reference_name.startswith("*")
@@ -475,7 +372,6 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-        # Write hotspots (BED format)
         with open(output.hotspots, "w") as out:
             out.write("# Insertion evidence hotspots\n")
             out.write(
@@ -486,13 +382,11 @@ rule find_hotspots:
                 chrom, pos = key.split(":")
                 pos = int(pos)
                 evidence = positions[key]
-                # Simple scoring: sum of all evidence types
                 score = (
-                    evidence["discordant"] * 2  # weight discordant more
+                    evidence["discordant"] * 2
                     + evidence["softclipped"] * 1
                     + evidence["unmapped"] * 1
                 )
-                # Only report if there's meaningful evidence
                 if score >= 2:
                     out.write(
                         f"{chrom}\t{pos}\t{pos+1}\t{score}\t"
@@ -504,22 +398,10 @@ rule find_hotspots:
 
 # =============================================================================
 # SECTION 5 — GENERATE INSERTION CANDIDATE SUMMARY
-#
-# For each sample, create a table of:
-# - Hotspot location (chrom:pos)
-# - Number of supporting reads by type
-# - Coverage at that position
-# - Ranked by evidence strength
-#
-# Ready for IGV inspection or PCR validation
 # =============================================================================
 
 
 rule candidate_summary:
-    """
-    Create a summary table of insertion candidates per sample.
-    Ranks hotspots by evidence strength and includes genome context.
-    """
     input:
         hotspots="results/hotspots/{sample}.insertion_hotspots.bed",
         bam="results/bowtie2/{sample}.sorted.bam",
@@ -535,7 +417,6 @@ rule candidate_summary:
     run:
         import pysam
 
-        # Read hotspots
         hotspots_list = []
         with open(input.hotspots) as f:
             for line in f:
@@ -554,9 +435,7 @@ rule candidate_summary:
                             "unmapped": int(unmapped),
                         }
                     )
-        # Sort by evidence score
         hotspots_list.sort(key=lambda x: x["score"], reverse=True)
-        # Get coverage at each position
         bam = pysam.AlignmentFile(input.bam, "rb")
         with open(output[0], "w") as out:
             out.write(
@@ -565,12 +444,10 @@ rule candidate_summary:
                 "local_coverage\tpriority\n"
             )
             for rank, hs in enumerate(hotspots_list, 1):
-                # Get coverage at position
                 try:
                     coverage = bam.count(hs["chrom"], hs["pos"], hs["pos"] + 1)
                 except:
                     coverage = "NA"
-                # Assign priority based on evidence
                 if hs["score"] >= 10 and hs["discordant"] >= 3:
                     priority = "HIGH"
                 elif hs["score"] >= 5 and hs["softclipped"] >= 2:
@@ -586,10 +463,6 @@ rule candidate_summary:
 
 
 rule merge_all_candidates:
-    """
-    Merge insertion candidates from all samples into one master table.
-    Adds sample ID for cross-sample comparison.
-    """
     input:
         expand("results/summary/{sample}.insertion_candidates.tsv", sample=ALL_SAMPLES),
     output:
@@ -601,7 +474,7 @@ rule merge_all_candidates:
     run:
         header_written = False
         with open(output[0], "w") as out:
-            out.write("sample\t")  # Add sample column
+            out.write("sample\t")
             for fp in sorted(input):
                 sample = fp.split("/")[-1].replace(".insertion_candidates.tsv", "")
                 with open(fp) as f:
