@@ -17,7 +17,7 @@ from pathlib import Path
 from collections import defaultdict
 
 # ── containers ────────────────────────────────────────────────────────────────
-bowtie2  = "docker://quay.io/biocontainers/bowtie2:2.5.5--ha27dd3b_0"
+bowtie2  = "docker://quay.io/biocontainers/bowtie2:2.5.4--he96a11b_7"
 samtools = "docker://quay.io/biocontainers/samtools:1.19.2--h50ea8bc_0"
 bedtools = "docker://quay.io/biocontainers/bedtools:2.31.1--hf5e1c6e_0"
 
