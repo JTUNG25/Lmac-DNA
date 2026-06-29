@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # =============================================================================
 # Workflow:
-#   - Generate FASTA indices (.fai)
 #   - Bowtie2 align (using pre-trimmed reads) → samtools sort/index
 #   - Extract discordant, soft-clipped, unmapped reads
 #   - Generate insertion hotspot map
@@ -77,7 +76,6 @@ def get_sample_reference(wc):
 # =============================================================================
 rule all:
     input:
-        expand("{genome}.fai", genome=ALL_REFERENCES),
         expand("{genome}.1.bt2", genome=ALL_REFERENCES),
         expand("results/bowtie2/{sample}.sorted.bam", sample=ALL_SAMPLES),
         expand("results/bowtie2/{sample}.sorted.bam.bai", sample=ALL_SAMPLES),
@@ -92,38 +90,11 @@ rule all:
 
 
 # =============================================================================
-# SECTION 0.5 — GENERATE FASTA INDICES
-# =============================================================================
-
-
-rule samtools_faidx:
-    """
-    Generate FASTA index (.fai) for each reference genome.
-    """
-    input:
-        "{genome}",
-    output:
-        "{genome}.fai",
-    threads: 1
-    resources:
-        mem_mb=4000,
-        runtime=10,
-    shell:
-        """
-        module load samtools/1.18-gcc-12.3.0
-        samtools faidx {input}
-        """
-
-
-# =============================================================================
 # SECTION 1 — BOWTIE2 ALIGNMENT
 # =============================================================================
 
 
 rule bowtie2_index:
-    """
-    Build Bowtie2 index for each reference genome (with T-DNA added).
-    """
     input:
         "{genome}",
     output:
@@ -150,22 +121,12 @@ rule bowtie2_index:
 
 
 rule bowtie2_align:
-    """
-    Align paired-end reads to sample-specific reference genome using Bowtie2.
-    """
     input:
         r1=r1,
         r2=r2,
-        ref=get_sample_reference,
-        index=lambda wc: multiext(
-            get_sample_reference(wc),
-            ".1.bt2",
-            ".2.bt2",
-            ".3.bt2",
-            ".4.bt2",
-            ".rev.1.bt2",
-            ".rev.2.bt2",
-        ),
+        ref=get_ref,
+        idx1=lambda wc: get_ref(wc) + ".1.bt2",
+        idx2=lambda wc: get_ref(wc) + ".2.bt2",
     output:
         bam="results/bowtie2/{sample}.sorted.bam",
         bai="results/bowtie2/{sample}.sorted.bam.bai",
@@ -173,36 +134,27 @@ rule bowtie2_align:
     resources:
         mem_mb=64000,
         runtime=240,
-    params:
-        index_name=get_sample_reference,
-        rg=r"@RG\tID:{sample}\tSM:{sample}\tPL:ILLUMINA",
-        tmp="/scratch/temp/bowtie2_{sample}",
     shell:
         """
         module load bowtie2/2.5.1-gcc-12.3.0
         module load samtools/1.18-gcc-12.3.0
 
-        mkdir -p {params.tmp}
+        mkdir -p tmp/bowtie2_{wildcards.sample}
+        TMPDIR=tmp/bowtie2_{wildcards.sample}
 
-        # Step 1: Generate SAM
-        bowtie2 -x {params.index_name} \
+        bowtie2 -x {input.ref} \
             -1 {input.r1} -2 {input.r2} \
             --threads {threads} \
             -k 5 -X 1000 --very-sensitive \
-            -R '{params.rg}' \
-            -S {params.tmp}/{wildcards.sample}.sam
+            -S $TMPDIR/{wildcards.sample}.sam
 
-        # Step 2: Convert SAM to sorted BAM
-        samtools sort -@ {threads} -T {params.tmp}/sort \
-            {params.tmp}/{wildcards.sample}.sam \
+        samtools sort -@ {threads} -T $TMPDIR/sort \
+            $TMPDIR/{wildcards.sample}.sam \
             -o {output.bam}
 
-        # Step 3: Index BAM
         samtools index -@ {threads} {output.bam}
 
-        # Cleanup
-        rm -f {params.tmp}/{wildcards.sample}.sam
-        rm -rf {params.tmp}
+        rm -rf $TMPDIR
         """
 
 
@@ -246,22 +198,18 @@ rule mapping_summary:
             for sample in sorted(ALL_SAMPLES):
                 with open(f"results/qc/{sample}.flagstat.txt") as f:
                     lines = f.readlines()
-
                 total = int(lines[0].split()[0])
                 mapped = int([l for l in lines if "mapped (" in l][0].split()[0])
                 properly = int(
                     [l for l in lines if "properly paired" in l][0].split()[0]
                 )
-
                 mapped_pct = f"{100*mapped/total:.1f}" if total > 0 else "0"
                 properly_pct = f"{100*properly/total:.1f}" if total > 0 else "0"
-
                 note = ""
                 if total < 1_000_000:
                     note = "WARNING: low read count"
                 elif mapped / total < 0.7:
                     note = "WARNING: low mapping rate"
-
                 out.write(
                     f"{sample}\t{total}\t{mapped}\t{mapped_pct}%\t"
                     f"{properly}\t{properly_pct}%\t{note}\n"
@@ -305,13 +253,11 @@ rule extract_softclipped:
 
         inbam = pysam.AlignmentFile(input.bam, "rb")
         outbam = pysam.AlignmentFile(output[0], "wb", template=inbam)
-
         count = 0
         for read in inbam:
             if read.cigarstring and "S" in read.cigarstring:
                 outbam.write(read)
                 count += 1
-
         inbam.close()
         outbam.close()
 
@@ -357,7 +303,6 @@ rule find_hotspots:
         positions = defaultdict(
             lambda: {"discordant": 0, "softclipped": 0, "unmapped": 0}
         )
-
         try:
             bam = pysam.AlignmentFile(input.discordant, "rb")
             for read in bam:
@@ -367,7 +312,6 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-
         try:
             bam = pysam.AlignmentFile(input.softclipped, "rb")
             for read in bam:
@@ -377,7 +321,6 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-
         try:
             bam = pysam.AlignmentFile(input.unmapped, "rb")
             for read in bam:
@@ -390,25 +333,21 @@ rule find_hotspots:
             bam.close()
         except:
             pass
-
         with open(output.hotspots, "w") as out:
             out.write("# Insertion evidence hotspots\n")
             out.write(
                 "# chrom\tstart\tend\tevidence_score\tdiscordant_count\t"
                 "softclipped_count\tunmapped_mate_count\n"
             )
-
             for key in sorted(positions):
                 chrom, pos = key.split(":")
                 pos = int(pos)
                 evidence = positions[key]
-
                 score = (
                     evidence["discordant"] * 2
                     + evidence["softclipped"] * 1
                     + evidence["unmapped"] * 1
                 )
-
                 if score >= 2:
                     out.write(
                         f"{chrom}\t{pos}\t{pos+1}\t{score}\t"
@@ -455,37 +394,30 @@ rule candidate_summary:
                             "unmapped": int(unmapped),
                         }
                     )
-
         hotspots_list.sort(key=lambda x: x["score"], reverse=True)
-
         bam = pysam.AlignmentFile(input.bam, "rb")
-
         with open(output[0], "w") as out:
             out.write(
                 "rank\tchrom\tposition\ttotal_evidence_score\t"
                 "discordant_reads\tsoftclipped_reads\tunmapped_mate_reads\t"
                 "local_coverage\tpriority\n"
             )
-
             for rank, hs in enumerate(hotspots_list, 1):
                 try:
                     coverage = bam.count(hs["chrom"], hs["pos"], hs["pos"] + 1)
                 except:
                     coverage = "NA"
-
                 if hs["score"] >= 10 and hs["discordant"] >= 3:
                     priority = "HIGH"
                 elif hs["score"] >= 5 and hs["softclipped"] >= 2:
                     priority = "MEDIUM"
                 else:
                     priority = "LOW"
-
                 out.write(
                     f"{rank}\t{hs['chrom']}\t{hs['pos']}\t{hs['score']}\t"
                     f"{hs['discordant']}\t{hs['softclipped']}\t"
                     f"{hs['unmapped']}\t{coverage}\t{priority}\n"
                 )
-
         bam.close()
 
 
