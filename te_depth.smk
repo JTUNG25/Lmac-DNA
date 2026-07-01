@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # =============================================================================
-# wgs_te.smk  —  WGS TE copy-number screen
+# wgs_te.smk  —  WGS TE copy-number screen with ACTIN NORMALIZATION
 # Leptosphaeria maculans JN3
+#
+# KEY CHANGE: Uses actin (Lmb_jn3_12354) depth as reference instead of 
+# genome-wide mean depth. This accounts for 25-37% batch sequencing depth
+# variation and provides a more robust single-copy reference normalization.
 #
 # Logic:
 #   1. Read significant_TEs.csv (from R script) → candidate TE family list
-#      Only upregulated TEs: log2FC > 1, padj < 0.05, already filtered for
-#      simple/low-complexity repeats by R script
+#      Only upregulated TEs: log2FC > 1, padj < 0.05
 #   2. Filter JN3.te.bed to candidate families only
 #   3. fastp  → trim WGS reads
-#   4. BWA-MEM → align all samples to plain JN3.fasta (same reference for all)
+#   4. BWA-MEM → align all samples to plain JN3.fasta
 #   5. bedtools coverage → mean read depth per TE locus
-#   6. samtools coverage → genome-wide mean depth (for normalisation)
-#   7. Collapse loci → per-family normalised depth per sample
+#   6. samtools depth → mean depth over actin locus (single-copy reference)
+#   7. Collapse loci → per-family actin-normalized depth per sample
 #   8. Compare each mutant vs WT → log2FC, flag INCREASED if >= log2(1.5)
 #   9. Final table cross-referenced against RNA log2FC from significant_TEs.csv
 #
@@ -37,6 +40,7 @@ GENOME    = "data/genome/JN3.fasta"
 TE_BED    = "data/genome/JN3.te.bed"
 TE_GTF    = "data/genome/JN3.te.gtf"
 SIG_TE    = "data/significant_TEs.csv"   # from R script, already on HPC
+ACTIN_BED = "data/genome/actin_reference.bed"  # single-copy reference locus
 
 # ── samples ───────────────────────────────────────────────────────────────────
 WGS_WT      = "D5"
@@ -48,8 +52,6 @@ WGS_MUTANTS = sorted([
 ALL_WGS = WGS_MUTANTS + [WGS_WT]
 
 # ── mutant → R-script label mapping ──────────────────────────────────────────
-# Links WGS sample names to the mutant labels in significant_TEs.csv
-# so we can pull the right candidate TE list per mutant group
 WGS_TO_LABEL = {
     "A1-1":  "Δago1",  "A1-2":  "Δago1",  "A1-3":  "Δago1",
     "A2-1":  "Δago2",  "A2-2":  "Δago2",  "A2-3":  "Δago2",
@@ -65,7 +67,7 @@ WGS_TO_LABEL = {
     "R12-1": "Δrdrp12","R12-2": "Δrdrp12","R12-3": "Δrdrp12",
 }
 
-# ── mutant groups (for per-group depth comparison output) ─────────────────────
+# ── mutant groups ────────────────────────────────────────────────────────────
 GROUPS = {
     "ago1":  {"label": "Δago1",   "samples": ["A1-1", "A1-2", "A1-3"]},
     "ago2":  {"label": "Δago2",   "samples": ["A2-1", "A2-2", "A2-3"]},
@@ -97,11 +99,11 @@ rule all:
         # QC
         expand("results/qc/{sample}.flagstat.txt",    sample=ALL_WGS),
         "results/qc/coverage_summary.txt",
-        # candidate BED (TE loci for upregulated families only)
+        # candidate BED
         "results/te_depth/candidate_te_loci.bed",
         # per-sample depth
         expand("results/te_depth/{sample}.locus_depth.bed",   sample=ALL_WGS),
-        expand("results/te_depth/{sample}.genome_depth.txt",  sample=ALL_WGS),
+        expand("results/te_depth/{sample}.actin_depth.txt",   sample=ALL_WGS),
         expand("results/te_depth/{sample}.family_depth.tsv",  sample=ALL_WGS),
         # per-group comparison vs WT
         expand("results/te_depth/{group}_vs_wt.tsv", group=GROUPS),
@@ -143,11 +145,6 @@ rule fastp_trim:
 
 # =============================================================================
 # SECTION 1 — BWA-MEM ALIGNMENT
-# All 18 samples aligned to the same plain JN3.fasta.
-# Critical: no T-DNA reference, so depth is comparable across all samples.
-# BWA-MEM chosen over Bowtie2 because -a flag retains all alignments for
-# multi-mapping reads, which is important for repetitive TE sequences.
-# Piped directly into samtools sort — no intermediate SAM file on disk.
 # =============================================================================
 
 rule bwa_index:
@@ -224,11 +221,6 @@ rule flagstat:
 
 
 rule coverage_summary:
-    """
-    One-line summary per sample: total reads, mapped reads, mapping %.
-    Check this before interpreting depth results — any sample with
-    unexpectedly low read counts should be investigated.
-    """
     input:
         expand("results/qc/{sample}.flagstat.txt", sample=ALL_WGS),
     output:
@@ -246,35 +238,15 @@ rule coverage_summary:
                 total  = int(lines[0].split()[0])
                 mapped = int([l for l in lines if "mapped (" in l][0].split()[0])
                 pct    = f"{100*mapped/total:.1f}" if total > 0 else "0"
-                note   = "WARNING: low read count — check before interpreting" \
-                         if total < 1_000_000 else ""
+                note   = "WARNING: low read count" if total < 1_000_000 else ""
                 out.write(f"{sample}\t{total}\t{mapped}\t{pct}%\t{note}\n")
 
 
 # =============================================================================
 # SECTION 3 — BUILD CANDIDATE TE LOCI BED
-#
-# Reads significant_TEs.csv (already filtered by R script:
-#   - padj < 0.05, log2FC > 1 (upregulated only)
-#   - simple/low-complexity repeats removed
-#   - gene rows removed)
-# Extracts the te_name from the feature column (everything before first ":")
-# Filters JN3.te.bed to only loci belonging to those candidate families.
-#
-# This means depth is only computed over TE families you actually care about,
-# not the entire repeat content of the genome.
 # =============================================================================
 
 rule make_candidate_bed:
-    """
-    Extract candidate TE family names from significant_TEs.csv,
-    filter JN3.te.bed to those families, then sort the BED to match
-    the BAM chromosome order (from the genome FASTA index).
-    This allows bedtools coverage -sorted to work correctly with low memory.
-
-    Uses a pure Python run block to avoid heredoc/variable expansion issues.
-    Sorting done via shell() call with bedtools sort -faidx.
-    """
     input:
         sig_csv = SIG_TE,
         te_bed  = TE_BED,
@@ -289,7 +261,6 @@ rule make_candidate_bed:
         mem_mb  = 8000,
         runtime = 5,
     run:
-        # ── step 1: filter BED to candidate families (pure Python) ────────
         candidate_names = set()
         with open(input.sig_csv) as f:
             f.readline()
@@ -316,8 +287,6 @@ rule make_candidate_bed:
 
         print(f"  {kept} TE loci written to unsorted BED")
 
-        # ── step 2: sort BED by genome chromosome order ───────────────────
-        # bedtools sort -faidx orders chromosomes to match BWA/BAM order
         shell(
             "apptainer exec {params.bed_sif} "
             "bedtools sort "
@@ -327,13 +296,6 @@ rule make_candidate_bed:
         )
 
 rule te_locus_depth:
-    """
-    Mean read depth over each candidate TE locus.
-    bedtools coverage -mean: for each interval in the BED, compute the
-    mean per-base depth from the BAM. Output adds one column (mean depth)
-    to the BED.
-    Only runs over candidate loci (not the full TE annotation) for efficiency.
-    """
     input:
         bam = "results/bwa/{sample}.sorted.bam",
         bai = "results/bwa/{sample}.sorted.bam.bai",
@@ -358,49 +320,55 @@ rule te_locus_depth:
         """
 
 
-rule genome_mean_depth:
+# ═══════════════════════════════════════════════════════════════════════════
+# NEW RULE: ACTIN DEPTH EXTRACTION
+# Extract mean depth over the actin reference locus (Lmb_jn3_12354)
+# Single-copy gene used as normalization standard across all samples
+# ═══════════════════════════════════════════════════════════════════════════
+
+rule actin_depth:
     """
-    Genome-wide mean depth for normalisation.
-    samtools coverage outputs per-contig stats; we compute a weighted mean
-    across all contigs (weighted by contig length) to get one value per sample.
-    This is the denominator in the normalisation formula above.
+    Mean read depth over actin locus (Lmb_jn3_12354).
+    This is the single-copy reference for normalization.
+    bedtools coverage -mean outputs one value per interval.
     """
     input:
         bam = "results/bwa/{sample}.sorted.bam",
         bai = "results/bwa/{sample}.sorted.bam.bai",
+        bed = ACTIN_BED,
+        fai = GENOME + ".fai",
     output:
-        "results/te_depth/{sample}.genome_depth.txt",
-    container: samtools
+        "results/te_depth/{sample}.actin_depth.txt",
+    container: bedtools
     threads: 2
     resources:
         mem_mb  = 16000,
-        runtime = 20,
+        runtime = 15,
     shell:
         """
-        samtools coverage {input.bam} | \
-        awk 'NR>1 && $3>0 {{
-            bases += $3
-            depth += $7 * $3
-        }} END {{
-            printf "%.4f\\n", (bases>0 ? depth/bases : 0)
-        }}' > {output}
+        bedtools coverage \
+            -a {input.bed} \
+            -b {input.bam} \
+            -mean \
+            -sorted \
+            -g {input.fai} | \
+        awk '{{print $NF}}' > {output}
         """
 
 
 rule family_depth:
     """
-    Collapse per-locus depth → per-family mean normalised depth.
+    Collapse per-locus depth → per-family actin-normalized depth.
 
-    For each TE family, there may be many individual loci (copies) in the
-    reference genome. We average the depth across all loci belonging to the
-    same family, then divide by genome-wide mean depth.
+    For each TE family, average depth across all loci, then divide by
+    actin depth (single-copy reference) to normalize for batch sequencing
+    depth variation.
 
-    This gives one normalised value per family per sample, directly comparable
-    to the log2FC values from TEtranscripts — just from the DNA side.
+    norm_depth = mean_locus_depth / actin_depth
     """
     input:
         depth  = "results/te_depth/{sample}.locus_depth.bed",
-        gd     = "results/te_depth/{sample}.genome_depth.txt",
+        actin  = "results/te_depth/{sample}.actin_depth.txt",
         te_gtf = TE_GTF,
     output:
         "results/te_depth/{sample}.family_depth.tsv",
@@ -411,10 +379,14 @@ rule family_depth:
     run:
         import re, collections
 
-        with open(input.gd) as f:
-            gd = float(f.read().strip() or 0)
+        with open(input.actin) as f:
+            actin_depth = float(f.read().strip() or 0)
 
-        # family → class from GTF (for annotation in output)
+        if actin_depth <= 0:
+            print(f"WARNING: actin depth is {actin_depth} — check BAM file")
+            actin_depth = 1.0  # fallback to avoid division by zero
+
+        # family → class from GTF
         fam_class = {}
         with open(input.te_gtf) as f:
             for line in f:
@@ -426,7 +398,6 @@ rule family_depth:
                     fam_class[mg.group(1)] = mc.group(1)
 
         # accumulate per-locus depths by family
-        # BED col4: locus_id;te_name  → split on ";" to get te_name
         fam_depths = collections.defaultdict(list)
         n_loci     = collections.defaultdict(int)
         with open(input.depth) as f:
@@ -436,41 +407,30 @@ rule family_depth:
                     continue
                 col4      = parts[3]
                 te_name   = col4.split(";")[1] if ";" in col4 else col4
-                locus_dep = float(parts[6])   # mean depth from bedtools -mean
+                locus_dep = float(parts[6])
                 fam_depths[te_name].append(locus_dep)
                 n_loci[te_name] += 1
 
         with open(output[0], "w") as out:
             out.write(
-                "# Normalised TE family depth — EXPLORATORY SCREEN\n"
-                "# norm_depth = mean_locus_depth / genome_mean_depth\n"
+                "# Actin-normalised TE family depth\n"
+                "# norm_depth = mean_locus_depth / actin_depth\n"
                 "te_name\tclass\tsample\tn_loci\t"
-                "mean_raw_depth\tgenome_mean_depth\tnorm_depth\n"
+                "mean_raw_depth\tactin_depth\tnorm_depth\n"
             )
             for te_name in sorted(fam_depths):
                 depths = fam_depths[te_name]
                 mean_d = sum(depths) / len(depths)
-                norm_d = mean_d / gd if gd > 0 else 0
+                norm_d = mean_d / actin_depth if actin_depth > 0 else 0
                 cls    = fam_class.get(te_name, "Unknown")
                 out.write(
                     f"{te_name}\t{cls}\t{wildcards.sample}\t"
-                    f"{n_loci[te_name]}\t{mean_d:.4f}\t{gd:.4f}\t{norm_d:.4f}\n"
+                    f"{n_loci[te_name]}\t{mean_d:.4f}\t{actin_depth:.4f}\t{norm_d:.4f}\n"
                 )
 
 
 # =============================================================================
 # SECTION 5 — COMPARE MUTANT DEPTH VS WT
-#
-# For each mutant group:
-#   log2FC_depth = log2(mutant_norm_depth / wt_norm_depth)
-#
-#   INCREASED flag: log2FC_depth >= log2(1.5)  i.e. >= 1.5-fold more reads
-#                   over TE loci in mutant vs WT
-#   NEW flag:       TE family present in mutant but zero depth in WT
-#                   (rare but biologically interesting)
-#
-# One column per WGS sample so you can see if the signal is consistent
-# within a mutant group (e.g. all three Δago1 samples show INCREASED).
 # =============================================================================
 
 rule depth_vs_wt:
@@ -501,7 +461,6 @@ rule depth_vs_wt:
                     p = line.strip().split("\t")
                     if len(p) < 7:
                         continue
-                    # te_name, class, sample, n_loci, mean_raw, genome_mean, norm
                     result[p[0]] = {
                         "class":  p[1],
                         "n_loci": int(p[3]),
@@ -525,8 +484,9 @@ rule depth_vs_wt:
 
         with open(output[0], "w") as out:
             out.write(
-                "# EXPLORATORY SCREEN — single WT replicate, no statistical testing\n"
+                "# ACTIN-NORMALIZED depth comparison\n"
                 "# log2FC_depth = log2(mutant_norm / wt_norm)\n"
+                "# All depths normalized by actin (Lmb_jn3_12354)\n"
                 "# INCREASED: log2FC >= 0.585 (>=1.5-fold vs WT)\n"
                 "# NEW: TE present in mutant, zero depth in WT\n"
                 f"te_name\tclass\tn_reference_loci\twt_norm_depth\t{mut_hdr}\n"
@@ -558,25 +518,6 @@ rule depth_vs_wt:
 
 # =============================================================================
 # SECTION 6 — FINAL CROSS-REFERENCE SUMMARY
-#
-# Joins per-group depth results with the RNA log2FC from significant_TEs.csv
-# so the final table has both RNA and DNA evidence side by side.
-#
-# Output columns per TE family:
-#   te_name, te_family, te_class        — identity
-#   rna_log2FC, rna_padj               — from TEtranscripts via R script
-#   n_reference_loci                   — how many copies in reference genome
-#   wt_norm_depth                      — normalised depth in WT
-#   [per sample] norm_depth, log2FC, flag  — DNA depth evidence
-#   any_increased                      — TRUE if any sample flagged INCREASED
-#   consistent_increased               — TRUE if ALL samples in group INCREASED
-#                                        (stronger evidence when >1 sample)
-#
-# Evidence interpretation:
-#   RNA up + depth INCREASED in all samples  → strong candidate
-#   RNA up + depth INCREASED in some samples → moderate candidate
-#   RNA up + depth flat                      → transcriptional derepression only
-#                                              (no copy number change detected)
 # =============================================================================
 
 rule crossref_group:
@@ -596,8 +537,8 @@ rule crossref_group:
         label   = GROUPS[group]["label"]
         members = GROUPS[group]["samples"]
 
-        # ── RNA sig results for this mutant label ─────────────────────────
-        rna_data = {}   # te_name -> (log2FC, padj, te_family, te_class)
+        # RNA data for this mutant label
+        rna_data = {}
         with open(input.sig_csv) as f:
             f.readline()
             for line in f:
@@ -605,22 +546,18 @@ rule crossref_group:
                 if len(parts) < 6:
                     continue
                 mutant  = parts[0].strip('"')
-                if mutant != label:
-                    continue
                 feature = parts[1].strip('"')
-                fp      = feature.split(":")
-                te_name = fp[0]
-                te_fam  = fp[1] if len(fp) > 1 else "Unknown"
-                te_cls  = fp[2] if len(fp) > 2 else "Unknown"
+                te_name = parts[2].strip('"')
+                te_fam  = parts[3].strip('"')
+                te_cls  = parts[4].strip('"')
                 try:
-                    lfc  = float(parts[2])
-                    padj = float(parts[5])
+                    lfc  = float(parts[5])
+                    padj = float(parts[8])
                 except ValueError:
                     continue
                 rna_data[te_name] = (lfc, padj, te_fam, te_cls)
 
-        # ── depth results ─────────────────────────────────────────────────
-        # parse the group depth file — already has one row per te_name
+        # Depth results
         depth_rows = {}
         with open(input.depth_tsv) as f:
             header = None
@@ -632,9 +569,9 @@ rule crossref_group:
                     continue
                 parts = line.strip().split("\t")
                 if parts:
-                    depth_rows[parts[0]] = parts   # keyed by te_name
+                    depth_rows[parts[0]] = parts
 
-        # ── write output ──────────────────────────────────────────────────
+        # Write output
         samp_hdr = "\t".join(
             [f"{s}_norm_depth\t{s}_log2FC_depth\t{s}_depth_flag"
              for s in members]
@@ -642,8 +579,8 @@ rule crossref_group:
         with open(output[0], "w") as out:
             out.write(
                 "# Cross-reference: RNA upregulation (TEtranscripts) vs "
-                "WGS read depth\n"
-                "# EXPLORATORY SCREEN — validate candidates with replicates\n"
+                "WGS read depth (ACTIN-NORMALIZED)\n"
+                "# All depths normalized by actin (Lmb_jn3_12354)\n"
             )
             out.write(
                 f"group\tmutant\tte_name\tte_family\tte_class\t"
@@ -658,11 +595,10 @@ rule crossref_group:
                 row_parts = depth_rows.get(te_name)
 
                 if row_parts:
-                    # cols: te_name class n_loci wt_norm | samp_norm samp_lfc samp_flag ...
                     cls    = row_parts[1]
                     n_loci = row_parts[2]
                     wt_nd  = row_parts[3]
-                    samp_cols = row_parts[4:]   # all per-sample columns
+                    samp_cols = row_parts[4:]
 
                     flags = [
                         samp_cols[i*3 + 2]
@@ -673,8 +609,6 @@ rule crossref_group:
                     consistent_inc = all(f == "INCREASED" for f in flags) \
                                      and len(flags) > 0
                 else:
-                    # TE was significant in RNA but had zero depth in WGS
-                    # (shouldn't happen often — worth flagging)
                     cls    = te_cls
                     n_loci = "0"
                     wt_nd  = "0"
@@ -692,11 +626,6 @@ rule crossref_group:
 
 
 rule merge_all_groups:
-    """
-    Concatenate all 8 group summaries into one master file.
-    This is the main deliverable — one table with RNA + DNA evidence
-    for every upregulated TE family across all mutants.
-    """
     input:
         expand("results/crossref/{group}_summary.tsv", group=GROUPS),
     output:

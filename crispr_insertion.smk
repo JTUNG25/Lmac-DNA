@@ -66,8 +66,7 @@ def r2(wc):
     return f"{FASTP_DIR}/{wc.sample}_R2.fastq.gz"
 
 
-def get_sample_reference(wc):
-    """Return the reference genome for a given sample"""
+def get_ref(wc):
     return SAMPLE_TO_REFERENCE[wc.sample]
 
 
@@ -289,7 +288,7 @@ rule find_hotspots:
         discordant="results/reads/{sample}.discordant.bam",
         softclipped="results/reads/{sample}.softclipped.bam",
         unmapped="results/reads/{sample}.unmapped_mate.bam",
-        fai=lambda wc: get_sample_reference(wc) + ".fai",
+        fai=lambda wc: get_ref(wc) + ".fai",
     output:
         hotspots="results/hotspots/{sample}.insertion_hotspots.bed",
     threads: 2
