@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8GB
 #SBATCH --time=24:00:00
-#SBATCH --job-name=wgs_te
+#SBATCH --job-name=te_depth
 #SBATCH --output=sm.log
 
 source /sw/local/rocky8/noarch/rcc/software/miniforge/24.11.3-0/etc/profile.d/conda.sh
@@ -47,8 +47,8 @@ mkdir -p data/genome data/repeatmodeler
 chmod +x profiles/bunya/status-sacct-robust.sh
 
 # ── run ───────────────────────────────────────────────────────────────────────
-snakemake -s wgs_te.smk --unlock --profile profiles/bunya/
+snakemake -s te_depth.smk --unlock --profile profiles/bunya/
 
-snakemake -s wgs_te.smk \
+snakemake -s te_depth.smk \
     --profile profiles/bunya/ \
     --singularity-args "--bind /QRISdata/Q9141 --bind $TMPDIR"
