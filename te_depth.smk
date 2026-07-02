@@ -246,12 +246,10 @@ rule make_candidate_bed:
     output:
         bed      = "results/te_depth/candidate_te_loci.bed",
         unsorted = temp("results/te_depth/candidate_te_loci.unsorted.bed"),
-    params:
-        bed_sif = bedtools,
     threads: 1
     resources:
-        mem_mb  = 16000,
-        runtime = 120,
+        mem_mb  = 8000,
+        runtime = 30,
     run:
         candidate_names = set()
         with open(input.sig_csv) as f:
@@ -280,7 +278,7 @@ rule make_candidate_bed:
         print(f"  {kept} TE loci written to unsorted BED")
 
         shell(
-            "apptainer exec {params.bed_sif} "
+            "module load bedtools/2.31.1-gcc-13.3.0 && "
             "bedtools sort "
             "-i {output.unsorted} "
             "-faidx {input.fai} "
