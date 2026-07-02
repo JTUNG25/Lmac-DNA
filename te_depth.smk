@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 # =============================================================================
-# wgs_te.smk  —  WGS TE copy-number screen with ACTIN NORMALIZATION
-# Leptosphaeria maculans JN3
-#
-# KEY CHANGE: Uses actin (Lmb_jn3_12354) depth as reference instead of 
-# genome-wide mean depth. This accounts for 25-37% batch sequencing depth
-# variation and provides a more robust single-copy reference normalization.
-#
 # Logic:
 #   1. Read significant_TEs.csv (from R script) → candidate TE family list
 #      Only upregulated TEs: log2FC > 1, padj < 0.05
@@ -60,7 +53,6 @@ WGS_TO_LABEL = {
     "D1":    "Δdcl1",
     "D2-2":  "Δdcl2",  "D2-3":  "Δdcl2",
     "R1-1":  "Δrdrp1",
-    "R1-2":  "Δrdrp1",
     "R2-2":  "Δrdrp2", "R2-3":  "Δrdrp2",
     "R2-4":  "Δrdrp2", "R2-5":  "Δrdrp2",
     "R3-1":  "Δrdrp3", "R3-2":  "Δrdrp3", "R3-3":  "Δrdrp3",
@@ -75,7 +67,7 @@ GROUPS = {
     "ago13": {"label": "Δago13",  "samples": ["A13-1", "A13-2"]},
     "dcl1":  {"label": "Δdcl1",   "samples": ["D1"]},
     "dcl2":  {"label": "Δdcl2",   "samples": ["D2-2", "D2-3"]},
-    "rdrp1": {"label": "Δrdrp1",  "samples": ["R1-1", "R1-2"]},
+    "rdrp1": {"label": "Δrdrp1",  "samples": ["R1-1"]},
     "rdrp2": {"label": "Δrdrp2",  "samples": ["R2-2", "R2-3", "R2-4", "R2-5"]},
     "rdrp3": {"label": "Δrdrp3",  "samples": ["R3-1","R3-2", "R3-3"]},
     "rdrp12":{"label": "Δrdrp12", "samples": ["R12-1", "R12-2", "R12-3"]},
@@ -258,8 +250,8 @@ rule make_candidate_bed:
         bed_sif = bedtools,
     threads: 1
     resources:
-        mem_mb  = 8000,
-        runtime = 5,
+        mem_mb  = 16000,
+        runtime = 120,
     run:
         candidate_names = set()
         with open(input.sig_csv) as f:
